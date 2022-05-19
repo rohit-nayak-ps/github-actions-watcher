@@ -43,17 +43,18 @@ type config struct {
 
 // process command line options and set global variables for use
 func getOptions() {
-	prNumber := flag.Int("pr", 0, "Github PR#")
 	org := flag.String("org", "", "Github Organization Name")
 	repo := flag.String("repo", "", "Github Repository Name")
 	token := flag.String("token", "", "Github Personal Access Token")
-	dryrun := flag.Bool("dryrun", false, "Just log what we will do")
+	dryrun := flag.Bool("dryrun", false, "Just log what we will do, no failed actions will be restarted")
+
+	prNumber := flag.Int("pr", 0, "(Optional) Github PR# to process, default: top N PRs")
 
 	flag.Parse()
 
 	if *org == "" || *repo == "" || *token == "" {
 		flag.Usage()
-		panic("")
+		os.Exit(-1)
 	}
 	watcherConfig = &config{
 		githubOrg:   *org,
