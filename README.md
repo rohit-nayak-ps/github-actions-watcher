@@ -58,4 +58,8 @@ Nice-to-have TBD:
 * Vercel UI to display above data
 * Aggregate recent failures
 
+### Issues
+* Need to check if I was able to do all this using a Personal Access token because I am a maintainer, and there are ACLs in effect in the Github API or if we need to configure the same at our repo level. ...
+It says here https://docs.github.com/en/developers/github-marketplace/creating-apps-for-github-marketplace/security-best-practices-for-apps that personal tokens should not be allowed in Apps, but that is what I am precisely doing ... 
+
 
