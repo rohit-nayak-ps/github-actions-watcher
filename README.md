@@ -20,7 +20,7 @@ Takes a PR number and restarts related workflows.
 
 Next Steps:
 * Convert to long-running process which wakes up every <N> seconds, watches all PRs, created within <X> days and restarts failed tests
-
+* add label TooManyFailures
 * Log failed tests and retries in a PlanetScale DB
 * Vercel UI to display above data
 

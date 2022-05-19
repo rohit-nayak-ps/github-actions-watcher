@@ -15,82 +15,134 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"github.com/google/go-github/v44/github"
 	"golang.org/x/oauth2"
-	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
-	maxWorkflowRetryAttempts = 4
+	maxWorkflowRetryAttempts = 4  // we will not attempt to retry workflows which have failed these many times
+	maxPRAgeDays             = 3  // only look for PRs updated within these days
+	maxAllowedFailures       = 10 // if a test has > these failures, assume it is genuinely failing CI
+	maxPRsToProcessAtATime   = 5
 )
 
-var githubOrg, githubRepo, githubToken string
-var prID int
+func setup(logFile *os.File) {
 
-func getOptions() {
-	id := flag.Int("pr", 0, "Github PR#")
-	org := flag.String("org", "", "Github Organization Name")
-	repo := flag.String("repo", "", "Github Repository Name")
-	token := flag.String("token", "", "Github Personal Access Token")
-
-	flag.Parse()
-
-	if *id == 0 || *org == "" || *repo == "" || *token == "" {
-		flag.Usage()
-		os.Exit(-1)
-	}
-
-	githubOrg = *org
-	githubRepo = *repo
-	githubToken = *token
-	prID = *id
-}
-func main() {
-	var err error
-	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Ldate)
+	setupLogging(logFile)
 	getOptions()
+}
+
+func main() {
+
+	var err error
+	var w *os.File
+	w, err = os.OpenFile(logFileName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer w.Close()
+	setup(w)
 
 	ctx := context.Background()
 	client, err := getClient(ctx)
 	if err != nil {
-		log.Println(err.Error())
-		os.Exit(-1)
+		panic(err.Error())
 	}
 
-	fmt.Printf("\n\n***** Starting watcher for %s/%s, PR %d\n\n\n", githubOrg, githubRepo, prID)
-	pr := getPR(ctx, client, prID)
+	prn.Printf("Starting watcher for %s/%s", watcherConfig.githubOrg, watcherConfig.githubRepo)
+
+	if watcherConfig.optPRNumber != 0 { // specific pr specified, we only process that one
+		dbg.Printf("Processing specified PR %d", watcherConfig.optPRNumber)
+		prn.Printf("Processing specified PR %d", watcherConfig.optPRNumber)
+		numStarted := processPR(ctx, client, watcherConfig.optPRNumber)
+		prn.Printf("Started %d workflow(s) for pr %d", numStarted, watcherConfig.optPRNumber)
+		dbg.Println("DONE")
+		return
+	}
+
+	dbg.Printf("Processing recent open PRs")
+	prn.Printf("Processing recent open PRs")
+	prs, err := getPRsToProcess(ctx, client)
+	prn.Printf("Found %d recent open PRs", len(prs))
+	prsProcessed := 0
+	for _, pr := range prs {
+		dbg.Printf("Processing PR %d", *pr.Number)
+		prn.Printf("Processing PR %d", *pr.Number)
+		numStarted := processPR(ctx, client, *pr.Number)
+		prn.Printf("Started %d workflows for pr %d", numStarted, *pr.Number)
+		if numStarted > 0 {
+			prsProcessed++
+		}
+		if prsProcessed > maxPRsToProcessAtATime {
+			prn.Printf("reached max limit of PRs to process: %d", prsProcessed)
+			break
+		}
+	}
+	prn.Printf("Done")
+}
+
+func getPRsToProcess(ctx context.Context, client *github.Client) ([]*github.PullRequest, error) {
+	var prsToProcess []*github.PullRequest
+	opts := &github.PullRequestListOptions{
+		State:       "open",
+		Sort:        "updated",
+		Direction:   "desc",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	prs, _, err := client.PullRequests.List(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, opts)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range prs {
+		// can do better?: can't differentiate b/w PRs blocked because tests have not passed OR not yet reviewed ...
+		if pr.MergeableState != nil && *pr.MergeableState != "blocked" {
+			continue
+		}
+		updatedAt := *pr.UpdatedAt
+		if time.Since(updatedAt).Hours() < 24*maxPRAgeDays {
+			prsToProcess = append(prsToProcess, pr)
+			if len(prsToProcess) >= maxPRsToProcessAtATime {
+				continue
+			}
+		}
+	}
+	return prsToProcess, nil
+}
+
+func processPR(ctx context.Context, client *github.Client, prNumber int) int {
+	pr := getPR(ctx, client, prNumber)
 
 	if pr == nil {
-		log.Printf("pr %d not found", prID)
-		os.Exit(-1)
+		dbg.Printf("pr %d not found", prNumber)
+		return 0
 	}
 	head := *pr.Head.SHA
 	branch := strings.Split(*pr.Head.Label, ":")[1]
-	if numStarted, err := restartFailedActions(ctx, client, head, branch); err != nil {
-		log.Printf("no pr id specified")
-		os.Exit(-1)
+	if numStarted, err := restartFailedActions(ctx, client, prNumber, head, branch); err != nil {
+		dbg.Printf("no pr id specified")
+		return 0
 	} else {
-		fmt.Printf("\n\n***** Done, started %d workflows for pr %d *****\n\n", numStarted, pr.Number)
+		return numStarted
 	}
 }
 
-func getPR(ctx context.Context, client *github.Client, prId int) *github.PullRequest {
-	pr, state, err := client.PullRequests.Get(ctx, githubOrg, githubRepo, prId)
+func getPR(ctx context.Context, client *github.Client, prNumber int) *github.PullRequest {
+	pr, state, err := client.PullRequests.Get(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, int(prNumber))
 	if err != nil {
-		log.Printf("getPR err: %s", err)
+		dbg.Printf("getPR err: %s", err)
 		return nil
 	}
-	log.Printf("PR %d:  MergeableState: %s, State: %s, SHA %s", *pr.Number, *pr.MergeableState, *pr.State, *pr.Head.SHA)
-	log.Printf("Client token and pagination state: %+v", state)
+	dbg.Printf("PR %d:  MergeableState: %s, State: %s, SHA %s", *pr.Number, *pr.MergeableState, *pr.State, *pr.Head.SHA)
+	dbg.Printf("Client token and pagination state: %+v", state)
 	return pr
 }
 
-func restartFailedActions(ctx context.Context, client *github.Client, sha, branch string) (int, error) {
-	numStarted := 0
+func restartFailedActions(ctx context.Context, client *github.Client, prNumber int, sha, branch string) (numStarted int, err error) {
+	numStarted = 0
 	status := "latest"
 	completed := "completed"
 	opts := &github.ListCheckRunsOptions{
@@ -102,30 +154,40 @@ func restartFailedActions(ctx context.Context, client *github.Client, sha, branc
 			PerPage: 200,
 		},
 	}
-	cs, _, err := client.Checks.ListCheckRunsForRef(ctx, githubOrg, githubRepo, sha, opts)
+	cs, _, err := client.Checks.ListCheckRunsForRef(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, sha, opts)
 	if err != nil {
 		return 0, fmt.Errorf("GetCheckSuite err: %s", err)
 	}
-	//log.Printf("Total Runs: %d", *cs.Total)
+	numFailures := 0
+	for _, checkRun := range cs.CheckRuns {
+		if *checkRun.Conclusion != "failure" {
+			numFailures++
+		}
+	}
+	if numFailures > maxAllowedFailures {
+		prn.Printf("Too many failures for PR %d, not attempting to retry any tests", prNumber)
+		dbg.Printf("Too many failures for PR %d, not attempting to retry any tests", prNumber)
+		return 0, nil
+	}
 	for i, checkRun := range cs.CheckRuns {
 		if *checkRun.Conclusion != "failure" {
 			continue
 		}
-		log.Printf("%d: Name: %s  Status:%s, Conclusion:%s, ID %d", i, *checkRun.Name, *checkRun.Status, *checkRun.Conclusion, *checkRun.ID)
+		dbg.Printf("%d: Name: %s  Status:%s, Conclusion:%s, ID %d", i, *checkRun.Name, *checkRun.Status, *checkRun.Conclusion, *checkRun.ID)
 		wfRun := getWorkflowRun(ctx, client, branch, *checkRun.ID, *checkRun.Name)
 		if wfRun == nil {
-			log.Printf("No Workflow Run found")
+			dbg.Printf("No Workflow Run found")
 			continue
 		}
 		if *wfRun.RunAttempt >= maxWorkflowRetryAttempts {
-			log.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
+			dbg.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
 			continue
 		}
 		if rerunFailedJob(ctx, client, int(*wfRun.ID)) != nil {
-			log.Printf("Failed starting workflowId %s", *wfRun.Name)
+			dbg.Printf("Failed starting workflowId %s", *wfRun.Name)
 		} else {
 			numStarted++
-			log.Printf("Successfully started workflowId %s", *wfRun.Name)
+			dbg.Printf("Successfully started workflowId %s", *wfRun.Name)
 		}
 	}
 	return numStarted, nil
@@ -133,7 +195,7 @@ func restartFailedActions(ctx context.Context, client *github.Client, sha, branc
 
 func getClient(ctx context.Context) (*github.Client, error) {
 	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: githubToken},
+		&oauth2.Token{AccessToken: watcherConfig.githubToken},
 	)
 	tc := oauth2.NewClient(ctx, ts)
 
@@ -147,27 +209,27 @@ func getWorkflowRun(ctx context.Context, client *github.Client, branch string, c
 		ListOptions: github.ListOptions{PerPage: 1000},
 	}
 
-	wfRuns, _, err := client.Actions.ListRepositoryWorkflowRuns(ctx, githubOrg, githubRepo, workflowOptions)
+	wfRuns, _, err := client.Actions.ListRepositoryWorkflowRuns(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, workflowOptions)
 	if err != nil {
-		log.Printf("getWorkflowRun err: %s", err)
+		dbg.Printf("getWorkflowRun err: %s", err)
 		return nil
 	}
-	//log.Printf("Got %d wfRuns", len(wfRuns.WorkflowRuns))
+	//dbg.Printf("Got %d wfRuns", len(wfRuns.WorkflowRuns))
 
 	completedJobs := make(map[string]bool)
 	for _, wfRun := range wfRuns.WorkflowRuns {
 		if *wfRun.Status != "completed" || (wfRun.Conclusion == nil || *wfRun.Conclusion != "failure") {
 			continue
 		}
-		//log.Printf("Status %s, Conclusion %s", *wfRun.Status, *wfRun.Conclusion)
-		wfJobs, _, err := client.Actions.ListWorkflowJobs(ctx, githubOrg, githubRepo, *wfRun.ID, nil)
+		//dbg.Printf("Status %s, Conclusion %s", *wfRun.Status, *wfRun.Conclusion)
+		wfJobs, _, err := client.Actions.ListWorkflowJobs(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, *wfRun.ID, nil)
 		if err != nil {
-			log.Printf("ListWorkflowJobs err: %s", err)
+			dbg.Printf("ListWorkflowJobs err: %s", err)
 			return nil
 		}
 		for _, wfJob := range wfJobs.Jobs {
 			jobName := *wfJob.Name
-			//log.Printf("wfName=%s, *wfRun.Name=%s, job name=%s", wfName, *wfRun.Name, jobName )
+			//dbg.Printf("wfName=%s, *wfRun.Name=%s, job name=%s", wfName, *wfRun.Name, jobName )
 			if *wfJob.Status != "completed" {
 				continue
 			}
@@ -177,7 +239,7 @@ func getWorkflowRun(ctx context.Context, client *github.Client, branch string, c
 					completedJobs[jobName] = true
 				case "failure":
 					if _, ok := completedJobs[jobName]; !ok {
-						log.Printf("Found wfName=%s, *wfRun.Name=%s, %s,%s,%s", wfName, *wfRun.Name, *wfJob.Conclusion, *wfJob.Status, *wfJob.CompletedAt)
+						dbg.Printf("Found wfName=%s, *wfRun.Name=%s, %s,%s,%s", wfName, *wfRun.Name, *wfJob.Conclusion, *wfJob.Status, *wfJob.CompletedAt)
 						return wfRun
 					}
 				}
@@ -191,9 +253,12 @@ func getWorkflowRun(ctx context.Context, client *github.Client, branch string, c
 }
 
 func rerunFailedJob(ctx context.Context, client *github.Client, wfId int) error {
-	_, err := client.Actions.RerunFailedJobsByID(ctx, githubOrg, githubRepo, int64(wfId))
+	if watcherConfig.isDryRun {
+		return nil
+	}
+	_, err := client.Actions.RerunFailedJobsByID(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, int64(wfId))
 	if err != nil {
-		log.Printf("RerunWorkflowByID err: %s", err)
+		dbg.Printf("RerunWorkflowByID err: %s", err)
 		return err
 	}
 	return nil
