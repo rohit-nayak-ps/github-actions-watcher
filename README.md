@@ -2,13 +2,31 @@
 
 _Temporarily hosting this in my personal repo_
 
-### Goal
-For a project with flaky tests, watching for failures and restarting those tests is time consuming.
-`github-actions-watcher` watches CI Actions on Pull Requests in a Github Project and restarts failed workflows (up to a max of 4 attempts). 
+### What it does
+
+For a project with lots of flaky tests, watching for failures and restarting those tests is time consuming.
+`github-actions-watcher` watches CI Actions on Pull Requests in a Github Project and restarts failed workflows.
+
+PRs considered for retry are:
+
+* Single PR is specified on command line
+* Default Most recent (updated < 3days) open PRs.
+* If any PR has a workflow with too many failing workflows (> 10) it will ignore it.
+* Workflows which have already run too many (>=3) times are ignored.
+* There is an upper limit (10) of PRs processed at a time, as a throttling measure
+
+Important logs output to `stderr` , with more detailed logging in `./watcher.log`.
+
+It is possible to record the detected failed workflows in a `PlanetScale` database. All you need to do is to specify your
+`PlanetScale DSN`.
+
+There is a companion UI in progress which uses Vercel to display the data stored in PlanetScale, current version
+at https://github-actions-watcher-ui.vercel.app/. 
 
 ### Installation/Usage
 
 ##### Installation
+
 ```
 git clone git@github.com:rohit-nayak-ps/github-actions-watcher.git
 make
@@ -20,12 +38,13 @@ Setup a personal access (or similar) token in Github for your repo.
 
 #### Usage
 
-Specify the token, the github organization name, repository name you want to watch and, optionally the PR, you want to restart tests for.
+Specify the token, the github organization name, repository name you want to watch and, optionally the PR, you want to
+restart tests for.
 
-##### Sample Usage
+##### Usage
+
 `github-actions-watcher -token <access_token> -org vitessio -repo vitess [-dryrun] [-pr <pr_number>]`
 
-##### Options
 ```
 Usage of ./github-actions-watcher:
   -dryrun
@@ -33,7 +52,9 @@ Usage of ./github-actions-watcher:
   -org string
     	Github Organization Name
   -pr int
-    	Github PR#
+    	(Optional) Github PR# to process, default: top N PRs
+  -pstoken string
+    	(Optional) PlanetScale Token, if specified, records detected failures
   -repo string
     	Github Repository Name
   -token string
@@ -41,25 +62,40 @@ Usage of ./github-actions-watcher:
 
 ```
 
+###### Sample Usage
+
+```
+rohit@rohit-ubuntu:~/github-actions-watcher$ ./github-actions-watcher  -dryrun -org vitessio -repo vitess -token ghp_redacted -pr 10335
+2022/05/19 13:10:19 ***** START DRY RUN *****
+2022/05/19 13:10:19 ***** Starting watcher for vitessio/vitess
+2022/05/19 13:10:19 Processing specified PR 10335
+2022/05/19 13:10:22 Too many failures for PR 10335, not attempting to retry any tests
+2022/05/19 13:10:22 Started 0 workflow(s) for pr 10335
+2022/05/19 13:10:22 ***** END DRY RUN *****
+
+rohit@rohit-ubuntu:~/github-actions-watcher$ ./github-actions-watcher  -dryrun -org vitessio -repo vitess -token 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 
+2022/05/19 13:13:14 ***** START DRY RUN *****
+2022/05/19 13:13:14 ***** Starting watcher for vitessio/vitess
+2022/05/19 13:13:14 Processing recent open PRs
+2022/05/19 13:13:17 Found 13 recent open PRs
+2022/05/19 13:13:17 Processing PR 10306
+2022/05/19 13:13:20 Too many failures for PR 10306, not attempting to retry any tests
+2022/05/19 13:13:20 Started 0 workflows for pr 10306
+...
+...
+
+```
+
 ### Status
+
 _*In Development*_
 
-Takes a PR number and restarts related workflows.
+#### ToDos
 
-Required TBD:
-* Convert to long-running process which wakes up every <N> seconds, watches all PRs, created within <X> days and restarts failed tests
 * add label TooManyFailures
 * Create cron job to run the watcher. Options:
-  * as a CRON workflow in Actions. Con: token will be publicly visible
-  * Serverless function in private cloud
-
-Nice-to-have TBD:
-* Log failed tests and retries in PlanetScale
-* Vercel UI to display above data
+    * as a CRON workflow in Actions. Con: token will be publicly visible
+    * Serverless function in private cloud
+* Use PlanetScale service tokens instead of the DSN
 * Aggregate recent failures
-
-### Issues
-* Need to check if I was able to do all this using a Personal Access token because I am a maintainer, and there are ACLs in effect in the Github API or if we need to configure the same at our repo level. ...
-It says here https://docs.github.com/en/developers/github-marketplace/creating-apps-for-github-marketplace/security-best-practices-for-apps that personal tokens should not be allowed in Apps, but that is what I am precisely doing ... 
-
 

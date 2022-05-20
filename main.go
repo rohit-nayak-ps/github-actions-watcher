@@ -24,10 +24,10 @@ import (
 )
 
 const (
-	maxWorkflowRetryAttempts = 4  // we will not attempt to retry workflows which have failed these many times
+	maxWorkflowRetryAttempts = 3  // we will not attempt to retry workflows which have failed these many times
 	maxPRAgeDays             = 3  // only look for PRs updated within these days
 	maxAllowedFailures       = 10 // if a test has > these failures, assume it is genuinely failing CI
-	maxPRsToProcessAtATime   = 5
+	maxPRsToProcessAtATime   = 10 // as a throttling measure, only these many eligible workflows will be tried
 )
 
 func setup(logFile *os.File) {
@@ -53,7 +53,22 @@ func main() {
 		panic(err.Error())
 	}
 
-	prn.Printf("Starting watcher for %s/%s", watcherConfig.githubOrg, watcherConfig.githubRepo)
+	if watcherConfig.isDryRun {
+		prn.Printf("***** START DRY RUN *****")
+		defer func() {
+			prn.Printf("***** END DRY RUN *****")
+		}()
+	} else {
+		if watcherConfig.psDSN != "" {
+			psdb, err = initPlanetScale(ctx)
+			if err != nil {
+				prn.Printf(err.Error())
+				os.Exit(-1)
+			}
+		}
+	}
+
+	prn.Printf("***** Starting watcher for %s/%s", watcherConfig.githubOrg, watcherConfig.githubRepo)
 
 	if watcherConfig.optPRNumber != 0 { // specific pr specified, we only process that one
 		dbg.Printf("Processing specified PR %d", watcherConfig.optPRNumber)
@@ -160,7 +175,7 @@ func restartFailedActions(ctx context.Context, client *github.Client, prNumber i
 	}
 	numFailures := 0
 	for _, checkRun := range cs.CheckRuns {
-		if *checkRun.Conclusion != "failure" {
+		if *checkRun.Conclusion == "failure" {
 			numFailures++
 		}
 	}
@@ -182,6 +197,13 @@ func restartFailedActions(ctx context.Context, client *github.Client, prNumber i
 		if *wfRun.RunAttempt >= maxWorkflowRetryAttempts {
 			dbg.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
 			continue
+		}
+		if psdb != nil {
+			sqlInsertFailedAction := "insert into action(pr, workflow, attempt, check_suite_url) values (?, ?, ?, ?);"
+			if _, err := psdb.Exec(sqlInsertFailedAction, prNumber, *wfRun.Name, *wfRun.RunAttempt, *wfRun.HTMLURL); err != nil {
+				dbg.Printf("Error inserting into psdb: %s", err)
+				prn.Printf("Error inserting into psdb: %s", err)
+			}
 		}
 		if rerunFailedJob(ctx, client, int(*wfRun.ID)) != nil {
 			dbg.Printf("Failed starting workflowId %s", *wfRun.Name)

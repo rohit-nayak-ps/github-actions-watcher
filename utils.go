@@ -14,10 +14,14 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"flag"
 	"io"
 	"log"
 	"os"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 var logFileName string
@@ -34,11 +38,13 @@ func setupLogging(w io.Writer) {
 }
 
 var watcherConfig *config
+var psdb *sql.DB
 
 type config struct {
 	githubOrg, githubRepo, githubToken string
-	optPRNumber                        int
 	isDryRun                           bool
+	optPRNumber                        int
+	psDSN                              string
 }
 
 // process command line options and set global variables for use
@@ -47,6 +53,8 @@ func getOptions() {
 	repo := flag.String("repo", "", "Github Repository Name")
 	token := flag.String("token", "", "Github Personal Access Token")
 	dryrun := flag.Bool("dryrun", false, "Just log what we will do, no failed actions will be restarted")
+
+	psDSN := flag.String("pstoken", "", "(Optional) PlanetScale Token, if specified, records detected failures")
 
 	prNumber := flag.Int("pr", 0, "(Optional) Github PR# to process, default: top N PRs")
 
@@ -62,5 +70,18 @@ func getOptions() {
 		githubToken: *token,
 		optPRNumber: *prNumber,
 		isDryRun:    *dryrun,
+		psDSN:       *psDSN,
 	}
+}
+
+func initPlanetScale(ctx context.Context) (*sql.DB, error) {
+	var err error
+	db, err := sql.Open("mysql", watcherConfig.psDSN)
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Ping(); err != nil {
+		return nil, err
+	}
+	return db, nil
 }
