@@ -73,7 +73,7 @@ rohit@rohit-ubuntu:~/github-actions-watcher$ ./github-actions-watcher  -dryrun -
 2022/05/19 13:10:22 Started 0 workflow(s) for pr 10335
 2022/05/19 13:10:22 ***** END DRY RUN *****
 
-rohit@rohit-ubuntu:~/github-actions-watcher$ ./github-actions-watcher  -dryrun -org vitessio -repo vitess -token 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 
+rohit@rohit-ubuntu:~/github-actions-watcher$ ./github-actions-watcher  -dryrun -org vitessio -repo vitess -token ghp_redacted 
 2022/05/19 13:13:14 ***** START DRY RUN *****
 2022/05/19 13:13:14 ***** Starting watcher for vitessio/vitess
 2022/05/19 13:13:14 Processing recent open PRs
