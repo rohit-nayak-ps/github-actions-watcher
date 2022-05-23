@@ -205,8 +205,11 @@ func restartFailedActions(ctx context.Context, client *github.Client, prNumber i
 				prn.Printf("Error inserting into psdb: %s", err)
 			}
 		}
+		prn.Printf("Rerunning %s ", *wfRun.Name)
+		dbg.Printf("Rerunning %s ", *wfRun.Name)
 		if rerunFailedJob(ctx, client, int(*wfRun.ID)) != nil {
 			dbg.Printf("Failed starting workflowId %s", *wfRun.Name)
+			prn.Printf("Failed starting workflowId %s", *wfRun.Name)
 		} else {
 			numStarted++
 			dbg.Printf("Successfully started workflowId %s", *wfRun.Name)
