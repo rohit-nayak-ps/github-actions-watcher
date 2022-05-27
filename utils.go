@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -45,6 +46,7 @@ type config struct {
 	isDryRun                           bool
 	optPRNumber                        int
 	psDSN                              string
+	ignoreWorkflows                    []string
 }
 
 // process command line options and set global variables for use
@@ -53,10 +55,9 @@ func getOptions() {
 	repo := flag.String("repo", "", "Github Repository Name")
 	token := flag.String("token", "", "Github Personal Access Token")
 	dryrun := flag.Bool("dryrun", false, "Just log what we will do, no failed actions will be restarted")
-
 	psDSN := flag.String("pstoken", "", "(Optional) PlanetScale Token, if specified, records detected failures")
-
 	prNumber := flag.Int("pr", 0, "(Optional) Github PR# to process, default: top N PRs")
+	ignoreWorkflowList := flag.String("ignore", "", "CSV of workflow names, ignored if contained")
 
 	flag.Parse()
 
@@ -64,13 +65,22 @@ func getOptions() {
 		flag.Usage()
 		os.Exit(-1)
 	}
+
+	var ignoreWorkflows []string
+	if *ignoreWorkflowList != "" {
+		arr := strings.Split(strings.TrimSpace(*ignoreWorkflowList), ",")
+		for _, wf := range arr {
+			ignoreWorkflows = append(ignoreWorkflows, strings.ToLower(strings.TrimSpace(wf)))
+		}
+	}
 	watcherConfig = &config{
-		githubOrg:   *org,
-		githubRepo:  *repo,
-		githubToken: *token,
-		optPRNumber: *prNumber,
-		isDryRun:    *dryrun,
-		psDSN:       *psDSN,
+		githubOrg:       *org,
+		githubRepo:      *repo,
+		githubToken:     *token,
+		optPRNumber:     *prNumber,
+		isDryRun:        *dryrun,
+		psDSN:           *psDSN,
+		ignoreWorkflows: ignoreWorkflows,
 	}
 }
 

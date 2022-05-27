@@ -194,6 +194,18 @@ func restartFailedActions(ctx context.Context, client *github.Client, prNumber i
 			dbg.Printf("No Workflow Run found")
 			continue
 		}
+		ignore := false
+		for _, substr := range watcherConfig.ignoreWorkflows {
+			if strings.Contains(strings.ToLower(*wfRun.Name), substr) {
+				ignore = true
+				continue
+			}
+		}
+		if ignore {
+			dbg.Printf("skipping ignored workflow %s", *wfRun.Name)
+			prn.Printf("skipping ignored workflow %s", *wfRun.Name)
+			continue
+		}
 		if *wfRun.RunAttempt >= maxWorkflowRetryAttempts {
 			dbg.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
 			continue
@@ -264,7 +276,8 @@ func getWorkflowRun(ctx context.Context, client *github.Client, branch string, c
 					completedJobs[jobName] = true
 				case "failure":
 					if _, ok := completedJobs[jobName]; !ok {
-						dbg.Printf("Found wfName=%s, *wfRun.Name=%s, %s,%s,%s", wfName, *wfRun.Name, *wfJob.Conclusion, *wfJob.Status, *wfJob.CompletedAt)
+						dbg.Printf("Found wfName=%s, *wfRun.Name=%s, %s,%s,%s", wfName, *wfRun.Name,
+							*wfJob.Conclusion, *wfJob.Status, *wfJob.CompletedAt)
 						return wfRun
 					}
 				}
