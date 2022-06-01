@@ -25,9 +25,9 @@ import (
 
 const (
 	maxWorkflowRetryAttempts = 3  // we will not attempt to retry workflows which have failed these many times
-	maxPRAgeDays             = 3  // only look for PRs updated within these days
+	maxPRAgeDays             = 2  // only look for PRs updated within these days
 	maxAllowedFailures       = 10 // if a test has > these failures, assume it is genuinely failing CI
-	maxPRsToProcessAtATime   = 10 // as a throttling measure, only these many eligible workflows will be tried
+	maxPRsToProcessAtATime   = 20 // as a throttling measure, only these many eligible workflows will be tried
 )
 
 func setup(logFile *os.File) {
@@ -208,6 +208,7 @@ func restartFailedActions(ctx context.Context, client *github.Client, prNumber i
 		}
 		if *wfRun.RunAttempt >= maxWorkflowRetryAttempts {
 			dbg.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
+			prn.Printf("Not attempting to rerun %s since it has already been run %d times", *wfRun.Name, *wfRun.RunAttempt)
 			continue
 		}
 		if psdb != nil {
@@ -243,6 +244,7 @@ func getClient(ctx context.Context) (*github.Client, error) {
 func getWorkflowRun(ctx context.Context, client *github.Client, branch string, checkSuiteID int64, wfName string) *github.WorkflowRun {
 	workflowOptions := &github.ListWorkflowRunsOptions{
 		Branch:      branch,
+		Status:      "failure",
 		ListOptions: github.ListOptions{PerPage: 1000},
 	}
 
@@ -251,14 +253,14 @@ func getWorkflowRun(ctx context.Context, client *github.Client, branch string, c
 		dbg.Printf("getWorkflowRun err: %s", err)
 		return nil
 	}
-	//dbg.Printf("Got %d wfRuns", len(wfRuns.WorkflowRuns))
+	dbg.Printf("Got %d wfRuns", len(wfRuns.WorkflowRuns))
 
 	completedJobs := make(map[string]bool)
 	for _, wfRun := range wfRuns.WorkflowRuns {
 		if *wfRun.Status != "completed" || (wfRun.Conclusion == nil || *wfRun.Conclusion != "failure") {
 			continue
 		}
-		//dbg.Printf("Status %s, Conclusion %s", *wfRun.Status, *wfRun.Conclusion)
+		dbg.Printf("%s: Status %s, Conclusion %s", *wfRun.Name, *wfRun.Status, *wfRun.Conclusion)
 		wfJobs, _, err := client.Actions.ListWorkflowJobs(ctx, watcherConfig.githubOrg, watcherConfig.githubRepo, *wfRun.ID, nil)
 		if err != nil {
 			dbg.Printf("ListWorkflowJobs err: %s", err)
