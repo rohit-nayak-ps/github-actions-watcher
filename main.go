@@ -84,11 +84,13 @@ func main() {
 	prs, err := getPRsToProcess(ctx, client)
 	prn.Printf("Found %d recent open PRs", len(prs))
 	prsProcessed := 0
+	totalStarted := 0
 	for _, pr := range prs {
 		dbg.Printf("Processing PR %d", *pr.Number)
 		prn.Printf("Processing PR %d", *pr.Number)
 		numStarted := processPR(ctx, client, *pr.Number)
 		prn.Printf("Started %d workflows for pr %d", numStarted, *pr.Number)
+		totalStarted += numStarted
 		if numStarted > 0 {
 			prsProcessed++
 		}
@@ -97,7 +99,7 @@ func main() {
 			break
 		}
 	}
-	prn.Printf("Done")
+	prn.Printf("Done. %d PRs processed, %d workflows started", prsProcessed, totalStarted)
 }
 
 func getPRsToProcess(ctx context.Context, client *github.Client) ([]*github.PullRequest, error) {
