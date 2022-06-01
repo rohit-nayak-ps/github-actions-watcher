@@ -17,11 +17,11 @@ PRs considered for retry are:
 
 Important logs output to `stderr` , with more detailed logging in `./watcher.log`.
 
-It is possible to record the detected failed workflows in a `PlanetScale` database. All you need to do is to specify your
-`PlanetScale DSN`.
+It is possible to record the detected failed workflows in a `PlanetScale` database. All you need to do is to specify
+your `PlanetScale DSN`.
 
 There is a companion UI in progress which uses Vercel to display the data stored in PlanetScale, current version
-at https://github-actions-watcher-ui.vercel.app/. 
+at https://github-actions-watcher-ui.vercel.app/.
 
 ### Installation/Usage
 
@@ -34,12 +34,14 @@ make
 
 ##### Prerequisite
 
-Setup a personal access (or similar) token in Github for your repo.
+Setup a personal access (or similar) token in Github for your repo, and possibly a PlanetScale account if you want to
+persist the list of discovered failed workflows.
 
 #### Usage
 
 Specify the token, the github organization name, repository name you want to watch and, optionally the PR, you want to
-restart tests for.
+restart tests for. YOu can also specify a list of strings: if a workflow name has one of these as a substring then it is
+ignored.
 
 ##### Usage
 
@@ -59,6 +61,8 @@ Usage of ./github-actions-watcher:
     	Github Repository Name
   -token string
     	Github Personal Access Token
+  -ignore string
+    	CSV of workflow name substrings to ignore
 
 ```
 

@@ -57,7 +57,7 @@ func getOptions() {
 	dryrun := flag.Bool("dryrun", false, "Just log what we will do, no failed actions will be restarted")
 	psDSN := flag.String("pstoken", "", "(Optional) PlanetScale Token, if specified, records detected failures")
 	prNumber := flag.Int("pr", 0, "(Optional) Github PR# to process, default: top N PRs")
-	ignoreWorkflowList := flag.String("ignore", "", "CSV of workflow names, ignored if contained")
+	ignoreWorkflowList := flag.String("ignore", "", "CSV of workflow name substrings to ignore")
 
 	flag.Parse()
 
